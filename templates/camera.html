@@ -1,0 +1,165 @@
+<!-- START OF FILE camera.html (根據您的穩定版生成) -->
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>從相簿上傳藥單</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #f0f2f5; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .container { width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; box-sizing: border-box; padding: 20px; }
+  .content { width: 90%; max-width: 480px; text-align: center; }
+  .header { color: #333; font-size: 1.5em; font-weight: bold; margin-bottom: 15px; }
+  .description { font-size: 1em; color: #666; margin-bottom: 30px; }
+  button { display: block; width: 100%; padding: 15px; margin-bottom: 15px; border-radius: 12px; border: none; font-size: 1.1em; font-weight: bold; cursor: pointer; transition: background-color 0.2s, opacity 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+  button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .btn-single-album { background-color: #007bff; color: white; }
+  .btn-multi-album { background-color: #28a745; color: white; }
+  .status-message { margin-top: 20px; font-size: 1em; padding: 10px; border-radius: 8px; text-align: center; display: none; /* 預設隱藏 */ }
+  .status-message.info { background-color: #e0e0e0; color: #333; }
+  .status-message.error { background-color: #f8d7da; color: #721c24; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="content">
+    <div class="header">上傳藥單</div>
+    <p class="description">請選擇您希望的方式來上傳藥單照片</p>
+    <button id="upload-single-btn" class="btn-single-album">📂 從相簿上傳單張</button>
+    <button id="upload-multi-btn" class="btn-multi-album">🖼️ 從相簿上傳多張</button>
+    <div id="status-message" class="status-message"></div>
+  </div>
+</div>
+
+<!-- 使用標準的檔案選擇器，完全繞過 liff.media -->
+<input type="file" id="single-file-input" accept="image/jpeg,image/png" style="display: none;">
+<input type="file" id="multi-file-input" accept="image/jpeg,image/png" multiple style="display: none;">
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // DOM Elements
+    const uploadSingleBtn = document.getElementById('upload-single-btn');
+    const uploadMultiBtn = document.getElementById('upload-multi-btn');
+    const singleFileInput = document.getElementById('single-file-input');
+    const multiFileInput = document.getElementById('multi-file-input');
+    const statusMessageDiv = document.getElementById('status-message');
+
+    let lineUserId = null;
+    let taskId = null;
+    // 【重要】請務必將此處的佔位符替換為您真實的 LIFF ID
+    const LIFF_ID = '2007578202-Nd6yz31o'; 
+
+    function showStatus(message, type = 'info') {
+        statusMessageDiv.textContent = message;
+        statusMessageDiv.className = `status-message ${type}`;
+        statusMessageDiv.style.display = 'block';
+    }
+
+    function setButtonsDisabled(disabled) {
+        uploadSingleBtn.disabled = disabled;
+        uploadMultiBtn.disabled = disabled;
+    }
+
+    async function uploadFiles(files) {
+        if (!files || files.length === 0) return;
+        if (!lineUserId || !taskId) {
+            showStatus("頁面初始化未完成或缺少任務ID，無法上傳。", 'error');
+            return;
+        }
+        
+        setButtonsDisabled(true);
+        showStatus("正在上傳照片...");
+
+        const formData = new FormData();
+        formData.append('lineUserId', lineUserId);
+        formData.append('taskId', taskId);
+        
+        if (files.length > 10) {
+            showStatus("一次最多只能上傳10張照片。", 'error');
+            setButtonsDisabled(false);
+            return;
+        }
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            // 為檔案提供一個唯一的名稱，避免潛在的後端處理問題
+            formData.append('photos', file, `photo_${Date.now()}_${i}.jpg`);
+        }
+
+        try {
+            const response = await fetch('/api/photo/upload_multiple_prescriptions', { method: 'POST', body: formData });
+            
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || `伺服器錯誤 (${response.status})`);
+            if (result.status !== "success") throw new Error(result.message || '後端回傳未知錯誤。');
+            
+            if (liff.isInClient()) {
+                await liff.sendMessages([{ type: 'text', text: result.message }]);
+                liff.closeWindow();
+            } else {
+                showStatus("上傳成功！請返回 LINE 查看。");
+            }
+        } catch (error) {
+            showStatus(`上傳失敗：${error.message}`, 'error');
+            setButtonsDisabled(false);
+        }
+    }
+
+    async function main() {
+        showStatus("正在初始化...");
+        setButtonsDisabled(true);
+        try {
+            await liff.init({ liffId: LIFF_ID });
+            
+            if (!liff.isLoggedIn()) {
+                liff.login({ redirectUri: window.location.href });
+                return;
+            }
+            
+            const profile = await liff.getDecodedIDToken();
+            lineUserId = profile.sub;
+            if (!lineUserId) {
+                throw new Error("無法獲取您的 LINE User ID。");
+            }
+
+            const urlParams = new URLSearchParams(window.location.search);
+            taskId = urlParams.get('taskId');
+            
+            if (!taskId) {
+                throw new Error("URL 中缺少任務ID (taskId)，請關閉視窗並從LINE中重新操作。");
+            }
+            
+            showStatus("初始化完成，請選擇檔案。", "info");
+            setButtonsDisabled(false);
+
+        } catch (err) {
+            // 避免在使用者尚未登入時重複跳轉
+            if (err.message && err.message.includes("NotLoggedIn")) return;
+            showStatus(`初始化失敗: ${err.message}`, 'error');
+            setButtonsDisabled(true);
+        }
+    }
+
+    // 事件綁定
+    uploadSingleBtn.addEventListener('click', () => singleFileInput.click());
+    uploadMultiBtn.addEventListener('click', () => multiFileInput.click());
+
+    singleFileInput.addEventListener('change', (e) => {
+        uploadFiles(e.target.files);
+        // 清空 input 的值，確保下次選擇同一個檔案也能觸發 change 事件
+        e.target.value = null; 
+    });
+    multiFileInput.addEventListener('change', (e) => {
+        uploadFiles(e.target.files);
+        // 清空 input 的值
+        e.target.value = null; 
+    });
+
+    main();
+});
+</script>
+</body>
+</html>
+<!-- END OF FILE camera.html -->

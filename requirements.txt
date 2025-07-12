@@ -1,0 +1,14 @@
+Flask
+flask-cors
+python-dotenv
+requests
+pymysql
+paddleocr==3.0.0
+paddlex==3.0.0
+setuptools
+opencv-python
+Pillow
+opencc-python-reimplemented
+google-generativeai
+google.genai
+gunicorn

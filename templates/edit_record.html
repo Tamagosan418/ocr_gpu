@@ -1,0 +1,247 @@
+<!-- START OF FILE templates/edit_record.html (最終修正版) -->
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>修改藥歷紀錄</title>
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f0f2f5; margin: 0; padding: 15px; color: #333; }
+  .container { max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: none; /* 預設隱藏 */ }
+  .loading-container { text-align: center; padding-top: 50px; color: #666; }
+  .header { background-color: #007bff; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center; }
+  h2 { margin: 0; font-size: 1.2em; }
+  .form-section { padding: 20px; border-bottom: 1px solid #eee; }
+  .form-group { margin-bottom: 15px; }
+  label { display: block; font-weight: bold; margin-bottom: 5px; font-size: 0.9em; }
+  input[type="text"], input[type="number"], input[type="date"], select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 1em; -webkit-appearance: none; appearance: none; background-color: white;}
+  select { background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23007AFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right .7em top 50%; background-size: .65em auto;}
+  .radio-group { display: flex; gap: 15px; margin-top: 5px; flex-wrap: wrap; }
+  .radio-group label { font-weight: normal; display: flex; align-items: center; }
+  .radio-group input { width: auto; margin-right: 5px; }
+  textarea { resize: vertical; min-height: 80px; }
+  .med-card { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px; position: relative; overflow: hidden; }
+  .med-header { background-color: #f7f7f7; padding: 10px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
+  .delete-btn { background: #ff4d4f; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; font-weight: bold; cursor: pointer; line-height: 24px; text-align: center; }
+  .footer { padding: 20px; text-align: center; }
+  button { padding: 12px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 1em; font-weight: bold; width: 100%; }
+  .btn-primary { background-color: #28a745; color: white; }
+  .btn-secondary { background-color: #6c757d; color: white; }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading-container">
+    <p>正在載入資料...</p>
+</div>
+
+<div id="app" class="container">
+    <div class="header"><h2 id="page-title">編輯藥歷內容</h2></div>
+    <div class="form-section">
+        <div class="form-group"><label for="clinic_name">診所名稱</label><input type="text" id="clinic_name"></div>
+        <div class="form-group"><label for="visit_date">看診日期</label><input type="date" id="visit_date"></div>
+        <div class="form-group"><label for="days_supply">給藥天數</label><input type="number" id="days_supply" placeholder="例如: 3"></div>
+    </div>
+    <div class="form-section">
+        <h3>藥物列表</h3>
+        <div id="medications-container"></div>
+        <button id="add-med-btn" class="btn-secondary" style="margin-top:15px;">＋ 新增一筆藥物</button>
+    </div>
+    <div class="footer"><button id="save-btn" class="btn-primary">儲存修改並預覽</button></div>
+</div>
+
+<script>
+    const pageState = {
+        liffId: '{{ liff_id_edit }}', // 將由 Flask 傳入
+        idToken: null,
+        originalData: {},
+        medCounter: 0,
+        frequencyOptions: {
+            counts: [
+                { value: 'QD', text: '一日一次' }, { value: 'BID', text: '一日二次' },
+                { value: 'TID', text: '一日三次' }, { value: 'QID', text: '一日四次' },
+                { value: 'HS', text: '睡前服用' }, { value: 'PRN', text: '需要時服用' }
+            ],
+            timings: [
+                { value: 'AC', text: '飯前' }, { value: 'PC', text: '飯後' },
+                { value: 'NULL', text: '皆可/不指定' }
+            ]
+        }
+    };
+
+    const loadingView = document.getElementById('loading');
+    const appView = document.getElementById('app');
+    const medContainer = document.getElementById('medications-container');
+    const addMedBtn = document.getElementById('add-med-btn');
+    const saveBtn = document.getElementById('save-btn');
+    const pageTitle = document.getElementById('page-title');
+    const clinicNameInput = document.getElementById('clinic_name');
+    const visitDateInput = document.getElementById('visit_date');
+    const daysSupplyInput = document.getElementById('days_supply');
+
+    function createMedCard(med = {}) {
+        pageState.medCounter++;
+        const cardId = `med-card-${pageState.medCounter}`;
+        const card = document.createElement('div');
+        card.className = 'med-card';
+        card.id = cardId;
+        
+        const countOptionsHtml = pageState.frequencyOptions.counts.map(opt => 
+            `<option value="${opt.value}" ${med.frequency_count_code === opt.value ? 'selected' : ''}>${opt.text}</option>`
+        ).join('');
+
+        const timingRadiosHtml = pageState.frequencyOptions.timings.map(opt => {
+            const isChecked = med.frequency_timing_code === opt.value || (!med.frequency_timing_code && opt.value === 'NULL');
+            return `<label><input type="radio" name="timing-${cardId}" value="${opt.value}" ${isChecked ? 'checked' : ''}>${opt.text}</label>`;
+        }).join('');
+
+        card.innerHTML = `
+          <div class="med-header">藥物 #${pageState.medCounter}</div>
+          <button class="delete-btn" data-target="${cardId}">×</button>
+          <div class="med-body">
+            <input type="hidden" class="drug-name-en" value="${med.drug_name_en || ''}">
+            <input type="hidden" class="matched-drug-id" value="${med.matched_drug_id || ''}">
+            <div class="form-group"><label>藥物中文名稱</label><input type="text" class="drug-name-zh" placeholder="請輸入藥物中文名稱" value="${med.drug_name_zh || ''}"></div>
+            <div class="form-group"><label>單次劑量</label><input type="text" class="dose-quantity" placeholder="例如: 1.00" value="${med.dose_quantity || ''}"></div>
+            <!-- 【核心修正】新增一個隱藏欄位來儲存 dosage_unit，確保資訊不遺失 -->
+            <input type="hidden" class="dosage-unit" value="${med.dosage_unit || ''}">
+            <div class="form-group">
+                <label>服用次數</label>
+                <select class="frequency-count-code">${countOptionsHtml}</select>
+            </div>
+            <div class="form-group">
+                <label>服用時機</label>
+                <div class="radio-group">${timingRadiosHtml}</div>
+            </div>
+            <div class="form-group"><label>主要用途</label><textarea class="main-use" placeholder="請輸入主要用途">${med.main_use || ''}</textarea></div>
+            <div class="form-group"><label>常見副作用</label><textarea class="side-effects" placeholder="請輸入常見副作用">${med.side_effects || ''}</textarea></div>
+          </div>`;
+        medContainer.appendChild(card);
+        card.querySelector('.delete-btn').addEventListener('click', (e) => {
+            document.getElementById(e.target.dataset.target).remove();
+        });
+    }
+
+    function renderPage(data) {
+        pageState.originalData = data;
+        const isFromSavedRecord = !!data.mm_id || (data.medications && data.medications.length > 0 && !data.task_id);
+
+        if (isFromSavedRecord) {
+            pageTitle.innerText = "修改藥歷紀錄";
+            saveBtn.innerText = "儲存修改";
+        } else {
+            pageTitle.innerText = "編輯藥單草稿";
+            saveBtn.innerText = "儲存修改並預覽";
+        }
+        
+        clinicNameInput.value = data.clinic_name || '';
+        visitDateInput.value = data.visit_date || '';
+        daysSupplyInput.value = data.days_supply || '';
+
+        medContainer.innerHTML = '';
+        pageState.medCounter = 0;
+        if (data.medications && data.medications.length > 0) {
+            data.medications.forEach(createMedCard);
+        }
+
+        loadingView.style.display = 'none';
+        appView.style.display = 'block';
+    }
+
+    async function saveData() {
+        saveBtn.disabled = true;
+        saveBtn.innerText = "儲存中...";
+
+        const medications = [];
+        document.querySelectorAll('.med-card').forEach(card => {
+            const timingRadio = card.querySelector(`input[name="timing-${card.id}"]:checked`);
+            let timingCode = timingRadio ? timingRadio.value : null;
+            if (timingCode === 'NULL') timingCode = null;
+
+            medications.push({
+                drug_name_zh: card.querySelector('.drug-name-zh').value.trim(),
+                drug_name_en: card.querySelector('.drug-name-en').value.trim(),
+                dose_quantity: card.querySelector('.dose-quantity').value.trim(),
+                // 【核心修正】讀取隱藏欄位中的 dosage_unit
+                dosage_unit: card.querySelector('.dosage-unit').value.trim(), 
+                main_use: card.querySelector('.main-use').value.trim(),
+                side_effects: card.querySelector('.side-effects').value.trim(),
+                matched_drug_id: card.querySelector('.matched-drug-id').value.trim(),
+                frequency_count_code: card.querySelector('.frequency-count-code').value,
+                frequency_timing_code: timingCode
+            });
+        });
+        
+        const payload = { ...pageState.originalData };
+        payload.clinic_name = clinicNameInput.value;
+        payload.visit_date = visitDateInput.value;
+        payload.days_supply = daysSupplyInput.value;
+        payload.medications = medications;
+
+        try {
+            const response = await fetch('/api/draft/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${pageState.idToken}`
+                },
+                body: JSON.stringify({ draftData: payload })
+            });
+
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.message || `伺服器錯誤 (${response.status})`);
+            
+            if (liff.isInClient()) {
+                await liff.sendMessages([{ type: 'text', text: '📝 預覽手動修改結果' }]);
+                liff.closeWindow();
+            } else {
+                alert("儲存成功！請返回 LINE 查看。");
+            }
+        } catch (err) {
+            alert(`儲存失敗：${err.message}`);
+            saveBtn.disabled = false;
+            saveBtn.innerText = pageState.originalData.mm_id ? "儲存修改" : "儲存修改並預覽";
+        }
+    }
+
+    async function main() {
+        try {
+            await liff.init({ liffId: pageState.liffId });
+            if (!liff.isLoggedIn()) {
+                liff.login();
+                return;
+            }
+
+            pageState.idToken = liff.getIDToken();
+            if (!pageState.idToken) {
+                throw new Error("無法獲取您的 LINE ID Token，請重新登入。");
+            }
+
+            const response = await fetch('/api/draft', {
+                headers: { 'Authorization': `Bearer ${pageState.idToken}` }
+            });
+            
+            if (!response.ok) {
+                const errData = await response.json();
+                throw new Error(errData.message || `無法從伺服器獲取草稿資料 (${response.status})`);
+            }
+            
+            const data = await response.json();
+            renderPage(data);
+
+        } catch (err) {
+            console.error("初始化或獲取資料失敗:", err);
+            loadingView.innerHTML = `<p>錯誤：${err.message}<br>請關閉此視窗並重試。</p>`;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        addMedBtn.addEventListener('click', () => createMedCard());
+        saveBtn.addEventListener('click', saveData);
+        main();
+    });
+</script>
+</body>
+</html>
+<!-- END OF FILE templates/edit_record.html (最終修正版) -->
